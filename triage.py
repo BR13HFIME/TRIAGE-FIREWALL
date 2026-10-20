@@ -1579,7 +1579,15 @@ _IPV4_RE = re.compile(
     r"(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})(?![\d.])")
 _IPV6_TOKEN_RE = re.compile(r"[0-9A-Fa-f:.]{2,45}")
 _PORT_RE = re.compile(r"(?<!\d)(\d{1,5})(?!\d)")
-_CGNAT = ipaddress.ip_network("100.64.0.0/10")
+# Redes "internas" (lado propio): RFC 1918, CGNAT, loopback, link-local y
+# ULA IPv6. No se usa ``is_private`` porque también incluye redes de
+# documentación/benchmark (192.0.2.0/24, 198.18.0.0/15...), que no son
+# parte de la red del cliente.
+_INTERNAL_NETWORKS: tuple[Any, ...] = tuple(ipaddress.ip_network(n) for n in (
+    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10",
+    "127.0.0.0/8", "169.254.0.0/16", "::1/128", "fc00::/7", "fe80::/10",
+    "fec0::/10",
+))
 
 IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
 
@@ -1635,7 +1643,7 @@ def ip_in_networks(ip: IPAddress, networks: Iterable[Any]) -> bool:
 @lru_cache(maxsize=262144)
 def is_internal_ip(ip: IPAddress | None,
                    internal_nets: Iterable[Any] = ()) -> bool:
-    """Indica si una IP es interna (privada, CGNAT, loopback o definida).
+    """Indica si una IP es interna (RFC 1918, CGNAT, loopback o definida).
 
     Args:
         ip: Dirección IP o None.
@@ -1646,11 +1654,8 @@ def is_internal_ip(ip: IPAddress | None,
     """
     if ip is None:
         return False
-    if ip.is_private or ip.is_loopback or ip.is_link_local:
-        return True
-    if ip.version == 4 and ip in _CGNAT:
-        return True
-    return ip_in_networks(ip, internal_nets)
+    return ip_in_networks(ip, _INTERNAL_NETWORKS) or \
+        ip_in_networks(ip, internal_nets)
 
 
 @lru_cache(maxsize=262144)
