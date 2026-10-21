@@ -579,6 +579,21 @@ class AbuseIPDBTests(TriageTestCase):
         os.environ.pop(triage.ABUSEIPDB_ENV_VAR)
         self.assertEqual(triage.resolve_api_key(None, [env_dir])[0],
                          "quoted-value-123")
+        # Casos típicos de Windows: UTF-16 (PowerShell ">") y ".env.txt".
+        (env_dir / ".env").write_bytes(
+            "ABUSEIPDB_API_KEY=utf16-value-123\r\n".encode("utf-16"))
+        self.assertEqual(triage.resolve_api_key(None, [env_dir])[0],
+                         "utf16-value-123")
+        (env_dir / ".env").unlink()
+        (env_dir / ".env.txt").write_text(
+            "ABUSEIPDB_API_KEY=notepad-value-123\r\n", encoding="utf-8")
+        self.assertEqual(triage.resolve_api_key(None, [env_dir])[0],
+                         "notepad-value-123")
+        (env_dir / ".env.txt").unlink()
+        with mock.patch.object(triage, "ABUSEIPDB_API_KEY_LOCAL",
+                               "in-code-value-123"):
+            self.assertEqual(triage.resolve_api_key(None, [env_dir])[0],
+                             "in-code-value-123")
 
     def test_end_to_end_with_fake_api(self) -> None:
         """Ejecución completa: consultas únicas, cache, 429 y secreto."""

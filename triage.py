@@ -85,6 +85,16 @@ except ImportError:  # pragma: no cover - depende del entorno
 
 __version__ = "1.0.0"
 
+# ───────────────────────────────────────────────────────────────────────────
+# API key de AbuseIPDB (opcional). Lo recomendado es NO escribirla aquí,
+# sino en un archivo ".env" junto a este script con la línea
+#     ABUSEIPDB_API_KEY=su_api_key
+# (o en la variable de entorno ABUSEIPDB_API_KEY, o con --api-key).
+# Si aun así prefiere fijarla en el código, péguela entre las comillas y
+# NO suba este archivo a GitHub con la key escrita.
+ABUSEIPDB_API_KEY_LOCAL = ""
+# ───────────────────────────────────────────────────────────────────────────
+
 LOG = logging.getLogger("cp_triage")
 
 Record = dict[str, Any]
@@ -4911,9 +4921,21 @@ def read_dotenv(path: Path) -> dict[str, str]:
     """
     values: dict[str, str] = {}
     try:
-        text = path.read_text(encoding="utf-8-sig")
-    except (OSError, UnicodeDecodeError):
+        raw_bytes = path.read_bytes()
+    except OSError:
         return values
+    # Windows: PowerShell 5 ("echo ... > .env") y el Bloc de notas
+    # ("Unicode") guardan en UTF-16; Excel/Notepad antiguo en cp1252.
+    if raw_bytes.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        text = raw_bytes.decode("utf-16", "replace")
+    elif raw_bytes[1::2].count(0) > len(raw_bytes) // 4:
+        text = raw_bytes.decode("utf-16-le", "replace")
+    else:
+        try:
+            text = raw_bytes.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            text = raw_bytes.decode("cp1252", "replace")
+    text = text.replace("\x00", "")
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
@@ -4934,7 +4956,8 @@ def resolve_api_key(cli_key: str | None,
     """Obtiene la API key de AbuseIPDB sin imprimirla nunca.
 
     Precedencia: ``--api-key`` > variable ``ABUSEIPDB_API_KEY`` > ``.env``
-    junto al script (o en el directorio actual).
+    (o ``.env.txt``) junto al script o en el directorio actual >
+    ``ABUSEIPDB_API_KEY_LOCAL`` al inicio de este archivo.
 
     Args:
         cli_key: Valor de ``--api-key`` (o None).
@@ -4950,13 +4973,29 @@ def resolve_api_key(cli_key: str | None,
         return _validated_key(env, f"variable de entorno {ABUSEIPDB_ENV_VAR}")
     seen: set[Path] = set()
     for directory in search_dirs:
-        env_file = (directory / ".env").resolve()
-        if env_file in seen:
-            continue
-        seen.add(env_file)
-        value = read_dotenv(env_file).get(ABUSEIPDB_ENV_VAR, "").strip()
-        if value:
-            return _validated_key(value, f"archivo {env_file}")
+        # ".env.txt": el Bloc de notas agrega .txt al guardar ".env".
+        for name in (".env", ".env.txt"):
+            env_file = (directory / name).resolve()
+            if env_file in seen:
+                continue
+            seen.add(env_file)
+            if not env_file.is_file():
+                continue
+            value = read_dotenv(env_file).get(ABUSEIPDB_ENV_VAR, "").strip()
+            if value:
+                if name != ".env":
+                    LOG.warning("API key leída de %s; renómbrelo a .env.",
+                                env_file)
+                return _validated_key(value, f"archivo {env_file}")
+            LOG.warning("%s existe pero no contiene una línea %s=...",
+                        env_file, ABUSEIPDB_ENV_VAR)
+    if ABUSEIPDB_API_KEY_LOCAL.strip():
+        return _validated_key(ABUSEIPDB_API_KEY_LOCAL.strip(),
+                              "ABUSEIPDB_API_KEY_LOCAL en triage.py")
+    LOG.info("No se encontró API key: ni --api-key, ni variable %s, ni "
+             ".env en: %s", ABUSEIPDB_ENV_VAR,
+             ", ".join(str(p.parent) for p in sorted(seen)
+                       if p.name == ".env"))
     return None, "none"
 
 

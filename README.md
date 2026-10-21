@@ -126,8 +126,11 @@ desde su primer avistamiento) de recurrentes.
 
 ## AbuseIPDB
 
-1. API key: `--api-key` > variable `ABUSEIPDB_API_KEY` > archivo `.env`
-   junto al script (o en el directorio actual). Ver `.env.example`. La key
+1. API key (en este orden): `--api-key` > variable `ABUSEIPDB_API_KEY` >
+   archivo `.env` junto al script o en el directorio actual (también lee
+   `.env.txt` del Bloc de notas y archivos UTF-16 de PowerShell) >
+   constante `ABUSEIPDB_API_KEY_LOCAL` al inicio de `triage.py` (no suba
+   el archivo a GitHub con la key escrita). Ver `.env.example`. La key
    nunca se imprime ni se escribe en reportes, cache o logs.
 2. Se consultan **IPs públicas únicas de origen** (nunca privadas,
    reservadas ni de documentación); `--abuseipdb-dst` agrega destinos
