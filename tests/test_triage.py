@@ -564,11 +564,21 @@ class AbuseIPDBTests(TriageTestCase):
             encoding="utf-8")
         self.assertEqual(triage.resolve_api_key(None, [env_dir])[0],
                          "from-dotenv")
-        os.environ[triage.ABUSEIPDB_ENV_VAR] = "from-env"
+        os.environ[triage.ABUSEIPDB_ENV_VAR] = "from-environment"
         self.assertEqual(triage.resolve_api_key(None, [env_dir])[0],
-                         "from-env")
-        self.assertEqual(triage.resolve_api_key("cli", [env_dir]),
-                         ("cli", "--api-key"))
+                         "from-environment")
+        self.assertEqual(triage.resolve_api_key("from-cli-flag", [env_dir]),
+                         ("from-cli-flag", "--api-key"))
+        # Keys con espacios/saltos de línea se rechazan (no rompen HTTP).
+        key, source = triage.resolve_api_key("bad key\nvalue", [env_dir])
+        self.assertIsNone(key)
+        self.assertIn("inválida", source)
+        (env_dir / ".env").write_text(
+            "ABUSEIPDB_API_KEY='quoted-value-123'  # comentario\n",
+            encoding="utf-8")
+        os.environ.pop(triage.ABUSEIPDB_ENV_VAR)
+        self.assertEqual(triage.resolve_api_key(None, [env_dir])[0],
+                         "quoted-value-123")
 
     def test_end_to_end_with_fake_api(self) -> None:
         """Ejecución completa: consultas únicas, cache, 429 y secreto."""
@@ -679,8 +689,9 @@ class ScoringAndReportTests(TriageTestCase):
                                                               text)))
         alert = self.alerts(report)[0]
         # 30 base scan + 20 CN + 15 RDP interno + 10 usuario + 10 accept
-        # + 5 primera vez = 90
-        self.assertEqual(alert["threat_score"], 90)
+        # = 85 (sin línea base histórica no hay bonus de "primera vez")
+        self.assertEqual(alert["threat_score"], 85)
+        self.assertEqual(alert["ip_seen_status"], "unknown")
         self.assertEqual(alert["score_type"], "FW")
 
     def test_campaigns_and_csv_outputs(self) -> None:
@@ -747,6 +758,195 @@ class ScoringAndReportTests(TriageTestCase):
             triage.main(["--help"])
         self.assertEqual(ctx.exception.code, 0)
         self.assertIn("--abuseipdb-offline", buf.getvalue())
+
+
+class RegressionTests(TriageTestCase):
+    """Casos encontrados en la revisión adversarial (no deben volver)."""
+
+    def test_truncated_and_corrupt_gzip_do_not_abort(self) -> None:
+        """Un .gz truncado recupera filas y otro corrupto no aborta todo."""
+        text = HEADER + "\n" + "\n".join(
+            row(time=f"29Sep2024 10:{i % 60:02d}:00", rule=f"R{i}")
+            for i in range(400)) + "\n"
+        blob = gzip.compress(text.encode())
+        (self.tmp / "trunc.csv.gz").write_bytes(blob[: len(blob) // 2])
+        bad = bytearray(blob)
+        bad[20:40] = b"\xff" * 20
+        (self.tmp / "bad.csv.gz").write_bytes(bytes(bad))
+        good = self.write("good.csv", HEADER + "\n" + row() + "\n")
+        code, _, report = self.run_cli(
+            "--input", str(self.tmp / "trunc.csv.gz"),
+            str(self.tmp / "bad.csv.gz"), str(good))
+        self.assertEqual(code, 0)
+        files = {f["source"]: f for f in report["summary"]["parse"]["files"]}
+        self.assertEqual(files["trunc.csv.gz"]["status"], "partial")
+        self.assertGreater(files["trunc.csv.gz"]["records"], 50)
+        self.assertEqual(files["bad.csv.gz"]["status"], "error")
+        self.assertEqual(files["good.csv"]["records"], 1)
+
+    def test_stray_cp1252_byte_keeps_utf8(self) -> None:
+        """Un byte cp1252 suelto no convierte todo el archivo a cp1252."""
+        body = (HEADER + "\n" + row(rule="Acción_Niño") + "\n").encode()
+        body += row(rule="Bad").encode().replace(b"Bad", b"B\xe9d") + b"\n"
+        path = self.tmp / "mixed.csv"
+        path.write_bytes(body)
+        _, _, report = self.run_cli("--input", str(path))
+        rules = [a["rule_name"] for a in self.alerts(report)]
+        self.assertEqual(rules, ["Acción_Niño", "Béd"])
+        self.assertEqual(report["summary"]["parse"]["files"][0]["encoding"],
+                         "utf-8")
+
+    def test_date_order_is_pinned_per_file(self) -> None:
+        """Una fecha mm/dd tardía no cambia las ambiguas siguientes."""
+        lines = [HEADER.replace("Time", "Date")]
+        lines += [row(time="05/10/2024 10:00:00") for _ in range(3)]
+        lines.append(row(time="10/25/2024 10:00:00"))
+        lines.append(row(time="06/10/2024 10:00:00"))
+        _, _, report = self.run_cli("--input", str(self.write(
+            "d.csv", "\n".join(lines) + "\n")), "--date-order", "dmy")
+        stamps = [a["timestamp"][:10] for a in self.alerts(report)]
+        self.assertEqual(stamps[0], "2024-10-05")
+        self.assertEqual(stamps[3], "2024-10-25")
+        self.assertEqual(stamps[4], "2024-10-06")
+        files = report["summary"]["parse"]["files"]
+        self.assertEqual(files[0]["date_order_conflicts"], 1)
+
+    def test_output_dir_inside_input_dir_still_reads_inputs(self) -> None:
+        """--output-dir igual a --input-dir no excluye las entradas."""
+        logs = self.tmp / "logs"
+        logs.mkdir()
+        (logs / "a.csv").write_text(HEADER + "\n" + row() + "\n",
+                                    encoding="utf-8")
+        argv = ["--input-dir", str(logs), "--output-dir", str(logs),
+                "--abuseipdb-cache", str(self.tmp / "c"), "--json",
+                "--quiet"]
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(triage.main(argv), 0)
+            self.assertEqual(triage.main(argv), 0)  # no re-ingiere reportes
+        report = json.loads((logs / "report.json").read_text("utf-8"))
+        self.assertEqual(report["summary"]["records_processed"], 1)
+
+    def test_concatenated_exports_with_new_header(self) -> None:
+        """Un segundo encabezado con otro orden de columnas se re-mapea."""
+        second = "Destination,Source,Action,Time,Access Rule Name"
+        text = "\n".join([
+            HEADER, row(src="45.155.205.10", dst="10.0.0.9"), second,
+            "10.0.0.8,45.155.205.11,Drop,29Sep2024 11:00:00,Block_X",
+        ]) + "\n"
+        _, _, report = self.run_cli("--input", str(self.write("c.csv",
+                                                              text)))
+        alerts = self.alerts(report)
+        self.assertEqual([(a["src_ip"], a["dst_ip"]) for a in alerts],
+                         [("45.155.205.10", "10.0.0.9"),
+                          ("45.155.205.11", "10.0.0.8")])
+
+    def test_duplicate_source_prefers_ip(self) -> None:
+        """Con dos columnas Source, se usa la que trae la IP."""
+        text = ("Time,Source,Source,Destination,Action\n"
+                "29Sep2024 10:00:00,web01,45.155.205.10,10.0.0.1,Accept\n")
+        _, _, report = self.run_cli("--input", str(self.write("d.csv",
+                                                              text)))
+        alert = self.alerts(report)[0]
+        self.assertEqual(alert["src_ip"], "45.155.205.10")
+        self.assertEqual(alert["src_host"], "web01")
+
+    def test_blade_alone_and_verdicts(self) -> None:
+        """Un blade sin detección o con veredicto benigno no es amenaza."""
+        header = HEADER + ",Verdict"
+        lines = [
+            header,
+            row(blade="Threat Emulation", action="Accept") + ",Benign",
+            row(blade="Threat Extraction", action="Extract") + ",",
+            row(blade="Threat Emulation", action="Prevent") + ",Malicious",
+        ]
+        _, _, report = self.run_cli("--input", str(self.write(
+            "b.csv", "\n".join(lines) + "\n")))
+        got = [(a["is_threat"], a["threat_category"])
+               for a in self.alerts(report)]
+        self.assertEqual(got, [(False, "policy-allow"),
+                               (False, "policy-other"), (True, "malware")])
+
+    def test_family_names_and_specific_descriptions(self) -> None:
+        """Familias conocidas y descripción específica sobre el blade."""
+        cases = [
+            (None, "Emotet", None, "botnet/c2"),
+            (None, "WannaCry", None, "malware"),
+            (None, "Ransomware attachment detected",
+             "Anti-Spam & Email Security", "malware"),
+            (None, "SYN Flood DDoS", "IPS", "dos/ddos"),
+            (None, "Microsoft Exchange ProxyShell", "IPS", "intrusion"),
+            ("Spyware / Malicious Sites", "", None, "malware"),
+            (None, "PUP.Optional.Toolbar", "Anti-Malware", "malware"),
+            (None, "Memory Leak Denial of Service", None, "dos/ddos"),
+        ]
+        for category, detail, blade, expected in cases:
+            with self.subTest(detail=detail or category):
+                branch, _, _, _ = triage.threat_text_classification(
+                    category, detail, blade)
+                self.assertEqual(branch, expected)
+        self.assertTrue(triage.looks_like_threat("Emotet beacon"))
+        self.assertFalse(triage.looks_like_threat("Very Low Risk"))
+        self.assertFalse(triage.looks_like_threat(
+            "openvpn Traffic Encrypted from 10.0.0.1 to 1.2.3.4"))
+
+    def test_cve_severity(self) -> None:
+        """Solo CVE explotadas activamente son CRITICAL."""
+        _, sub, sev, _ = triage.threat_text_classification(
+            "intrusion", "Generic Web Server XYZ (CVE-2019-1234)", "IPS")
+        self.assertEqual((sub, sev), (triage.SUBTYPE_CVE, "HIGH"))
+        _, sub, sev, _ = triage.threat_text_classification(
+            "intrusion", "Check Point VPN Info Disclosure (CVE-2024-24919)",
+            "IPS")
+        self.assertEqual((sub, sev), ("Zero-day / CVE activo", "CRITICAL"))
+
+    def test_http_client_errors_are_network_errors(self) -> None:
+        """IncompleteRead/BadStatusLine no abortan la ejecución."""
+        import http.client
+
+        def opener(req: Any, timeout: float = 0) -> Any:
+            raise http.client.IncompleteRead(b"partial")
+
+        client = triage.AbuseIPDBClient(FAKE_KEY, 90, 0.0, opener=opener,
+                                        sleep=lambda _s: None)
+        with self.assertRaises(triage.AbuseIPDBError) as ctx:
+            client.check("8.8.8.8")
+        self.assertEqual(ctx.exception.kind, "network")
+
+    def test_ai_score_threshold_on_allowed_traffic(self) -> None:
+        """Tráfico permitido desde una IP con AI-score alto es alerta."""
+        now = triage.datetime.now(triage.timezone.utc)
+        intel = triage.IntelRecord(
+            ip="45.155.205.10", confidence=30, total_reports=200,
+            distinct_users=20,
+            last_reported_at=triage.iso(now - triage.timedelta(hours=1)))
+        self.assertGreaterEqual(intel.ai_score(now)[0], 50)
+        store = triage.IntelStore()
+        store.add(intel)
+        config = triage.TriageConfig(country_tiers={}, now=now)
+        profile = triage.DatasetProfile(config)
+        ctx = triage.TriageContext(config, store, triage.IPHistory(
+            self.tmp, False), profile)
+        rec = {k: None for k in triage.ALERT_FIELDS}
+        rec.update(src_ip="45.155.205.10", dst_ip="10.0.0.9",
+                   action_result=triage.ACTION_ALLOWED, alert_flag=False,
+                   is_threat=False, direction="inbound", dst_port=443)
+        cls = triage.classify(rec, ctx)
+        self.assertTrue(cls.is_threat)
+        self.assertEqual(cls.source, "abuseipdb")
+
+    def test_outbound_campaign_recommendation(self) -> None:
+        """Campañas salientes: aislar el host interno, bloquear destino."""
+        lines = [HEADER] + [
+            row(time=f"29Sep2024 10:0{i}:00", blade="Anti-Bot",
+                action="Prevent", src="10.0.0.7", dst="45.155.205.99",
+                malware="Communication with C&C site")
+            for i in range(3)]
+        _, _, report = self.run_cli("--input", str(self.write(
+            "o.csv", "\n".join(lines) + "\n")))
+        rec = next(c["recommendation"] for c in report["campaigns"]
+                   if c["campaign_type"] == "src")
+        self.assertIn("Host interno 10.0.0.7", rec)
+        self.assertIn("aislar", rec)
 
 
 if __name__ == "__main__":
