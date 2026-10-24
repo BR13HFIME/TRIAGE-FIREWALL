@@ -1,0 +1,13 @@
+# Salidas y estado local de triage.py
+triage_output/
+ip_cache/
+.triage-tmp-*/
+*.partial
+
+# Secretos: la API key de AbuseIPDB nunca se versiona
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/

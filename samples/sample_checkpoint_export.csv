@@ -1,0 +1,32 @@
+﻿Exported by: soc_admin (SmartConsole R81.20 Logs & Monitor)
+Query: last 24 hours; blade:*
+Time,Blade,Action,Type,Origin,Source,Source Port,Destination,Destination Port,Service,Access Rule Number,Access Rule Name,Protection Name,Attack Name,Malware Action,Threat Category,Source Country,Destination Country,Source User Name,Description,Severity,Sent Bytes
+29Sep2024 08:01:12,Firewall,Accept,Connection,gw-mx-01,10.10.1.15,51234,93.184.216.34,443,https (TCP/443),7,Allow_Web_Out,,,,,,United States,jlopez (jlopez),https Traffic Accepted from 10.10.1.15 to 93.184.216.34,,15230
+29Sep2024 08:02:40,Firewall,Accept,Connection,gw-mx-01,10.10.1.22,51990,8.8.8.8,53,dns (UDP/53),8,Allow_DNS_Out,,,,,,United States,,dns Traffic Accepted from 10.10.1.22 to 8.8.8.8,,120
+29Sep2024 08:05:03,Firewall,Drop,Connection,gw-mx-01,203.0.113.45,44321,10.10.5.10,3389,ms-rdp (TCP/3389),3,Block_Country_CN,,,,,China,,,,,0
+29Sep2024 08:05:09,Firewall,Drop,Connection,gw-mx-01,203.0.113.46,44322,10.10.5.10,22,ssh (TCP/22),99,Cleanup rule,,,,,China,,,,,0
+29Sep2024 08:06:15,Firewall,Drop,Connection,gw-mx-01,198.51.100.77,40001,10.10.5.20,8443,https (TCP/8443),40,Web_Servers_DMZ,,,,,Brazil,,,,,0
+29Sep2024 08:10:00,IPS,Prevent,Log,gw-mx-01,185.220.101.34,53001,10.10.5.20,80,http (TCP/80),5,,Host Port Scan,Port Scan,,,Russian Federation,,,,Medium,0
+29Sep2024 08:10:04,IPS,Prevent,Log,gw-mx-01,185.220.101.34,53002,10.10.5.21,80,http (TCP/80),5,,Host Port Scan,Port Scan,,,Russian Federation,,,,Medium,0
+29Sep2024 08:10:09,IPS,Prevent,Log,gw-mx-01,185.220.101.34,53003,10.10.5.22,443,https (TCP/443),5,,Host Port Scan,Port Scan,,,Russian Federation,,,,Medium,0
+29Sep2024 08:15:44,IPS,Detect,Log,gw-mx-01,45.155.205.10,40100,10.10.5.30,445,microsoft-ds (TCP/445),5,,Microsoft SMB Remote Code Execution (CVE-2017-0144),,,,China,,,,Critical,0
+29Sep2024 08:16:01,IPS,Prevent,Log,gw-mx-01,45.155.205.10,40101,10.10.5.20,80,http (TCP/80),5,,Apache Log4j Remote Code Execution (CVE-2021-44228),,,,China,,,,Critical,0
+29Sep2024 08:20:30,Anti-Bot,Prevent,Log,gw-mx-01,10.10.2.40,49200,192.0.2.66,443,https (TCP/443),12,,Trojan.Win32.Emotet.TC,,Communication with C&C site,,,Iran,mgarcia (mgarcia),,High,980
+29Sep2024 08:21:30,Anti-Bot,Prevent,Log,gw-mx-01,10.10.2.40,49201,192.0.2.66,443,https (TCP/443),12,,Trojan.Win32.Emotet.TC,,Communication with C&C site,,,Iran,mgarcia (mgarcia),,High,980
+29Sep2024 08:25:12,Anti-Virus,Prevent,Log,gw-mx-01,198.51.100.9,80,10.10.3.12,51000,http (TCP/80),6,,Trojan:Win32/WannaCry,,Malicious file download,malware,Brazil,,ana.ruiz,,High,0
+29Sep2024 08:27:00,Threat Emulation,Detect,Log,gw-mx-01,198.51.100.10,80,10.10.3.13,51001,http (TCP/80),6,,Backdoor.Win32.Remcos,,,malware,India,,pedro,,High,0
+29Sep2024 08:30:00,Anti-Virus,Prevent,Log,gw-mx-01,198.51.100.11,80,10.10.3.14,51002,http (TCP/80),6,,Adware.Generic.Toolbar,,,malware,Vietnam,,,,Low,0
+29Sep2024 08:35:21,DLP,Prevent,Log,gw-mx-01,10.10.4.50,52011,198.51.100.200,443,https (TCP/443),9,,PCI - Credit Card Numbers,,,data-leak,,United States,lucia,,High,5242880
+29Sep2024 08:40:00,Firewall,Accept,Alert,gw-mx-01,10.10.1.80,52100,203.0.113.80,6881,bittorrent (TCP/6881),15,P2P_Monitor,,,,,,Netherlands,,,,1048576
+29Sep2024 08:45:10,Application Control,Block,Log,gw-mx-01,10.10.1.81,52101,198.51.100.81,443,https (TCP/443),16,Block_Anonymizers,Ultrasurf,,,Proxy Avoidance and Anonymizers,,Canada,,,,0
+29Sep2024 08:46:10,IPS,Detect,Log,gw-mx-01,10.10.1.82,52102,203.0.113.53,53,dns (UDP/53),5,,DNS Tunneling (iodine),,,tunneling,,Germany,,,High,8800000
+29Sep2024 08:50:00,Anti-Spam & Email Security,Prevent,Log,gw-mx-01,198.51.100.25,25,10.10.6.5,25,smtp (TCP/25),11,,,,,Spam,Nigeria,,,,Low,0
+29Sep2024 08:51:00,Zero Phishing,Prevent,Log,gw-mx-01,198.51.100.26,443,10.10.1.90,52200,https (TCP/443),11,,Credential Harvesting Phishing Page,,,phishing,Nigeria,,rosa,,High,0
+29Sep2024 09:00:00,Firewall,Accept,Connection,gw-mx-01,45.155.205.10,40110,10.10.5.30,3389,ms-rdp (TCP/3389),4,Allow_RDP_Vendors,,,,,China,,,,,2048
+29Sep2024 09:05:00,IPS,Prevent,Log,gw-mx-01,203.0.113.99,60000,10.10.5.40,80,http (TCP/80),5,,SQL Injection Attempt,,,intrusion,Turkey,,,,High,0
+29Sep2024 09:10:00,IPS,Prevent,Log,gw-mx-01,203.0.113.100,60001,10.10.5.40,22,ssh (TCP/22),5,,SSH Brute Force Login Attempt,,,intrusion,Pakistan,,,,High,0
+29Sep2024 09:15:00,DDoS Protector,Prevent,Log,gw-mx-01,203.0.113.150,0,10.10.5.20,80,http (TCP/80),0,,SYN Flood DDoS,,,dos,Venezuela,,,,Critical,0
+29Sep2024 09:20:00,Firewall,Drop,Connection,gw-mx-01,10.10.1.95,52300,198.51.100.95,443,https (TCP/443),99,CPNotEnoughDataForRuleMatch,,,,,,United States,,,,0
+29Sep2024 09:25:00,Firewall,Accept,Connection,gw-mx-01,10.10.1.96,52301,104.16.1.1,443,https (TCP/443),7,Allow_Web_Out,,,,,,United States,,https Traffic Accepted from 10.10.1.96 to 104.16.1.1,,4096
+29Sep2024 09:30:00,Firewall,Drop,Connection,gw-mx-01,10.10.1.97,"52302,198.51.100.97
+29Sep2024 09:35:00,Firewall,Drop,Connection,gw-mx-01,203.0.113.200,44000,10.10.5.10,23,telnet (TCP/23),99,Cleanup rule,,,,,Korea Democratic People's Republic of,,,,,0
