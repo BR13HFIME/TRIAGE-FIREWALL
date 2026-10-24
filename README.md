@@ -14,6 +14,33 @@ HTML autocontenido.
   `--abuseipdb-offline`, funciona 100% offline con la cache local y los
   datos del firewall.
 
+## Interfaz gráfica (doble clic)
+
+Mantenga `triage.py` y `triage_gui.pyw` en la misma carpeta.
+
+* **Windows:** doble clic en `triage_gui.pyw` (abre sin consola). Si no se
+  abre, use `Iniciar_Triage.bat`. También puede arrastrar archivos CSV
+  sobre el icono de `triage_gui.pyw`.
+* **macOS:** doble clic en `Iniciar_Triage.command` (la primera vez:
+  clic derecho → Abrir). Requiere Python con tkinter: el instalador de
+  python.org ya lo trae; con Homebrew, `brew install python-tk`.
+
+En la ventana:
+
+1. **Archivos:** agregue archivos o carpetas, elija la carpeta de
+   resultados y los reportes (CSV, HTML, JSON).
+2. **Filtros:** severidades y categorías a incluir.
+3. **AbuseIPDB:** escriba la API key, **Guardar en .env** para no volver a
+   escribirla y **Probar key** para verificar que funciona. Aquí también
+   se ajusta la velocidad (segundos entre consultas).
+4. **Analizar:** el progreso se ve en vivo (pestaña Registro) y se puede
+   cancelar. Al terminar, la pestaña **Resultados** muestra los conteos
+   por severidad, categorías, top IPs y recomendaciones, con botones para
+   abrir cada reporte; el dashboard HTML se abre solo.
+
+Las opciones se recuerdan entre sesiones (`~/.cp_triage_gui.json`); la API
+key nunca se guarda ahí ni aparece en el registro.
+
 ## Uso rápido
 
 ```bash

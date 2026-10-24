@@ -1349,6 +1349,7 @@ class TriageConfig:
         color: Usar colores ANSI en consola.
         home_country: País de la infraestructura propia (IPs internas).
         dedup: Omitir registros con UID repetido.
+        summary_path: Archivo donde escribir el resumen en JSON (GUI).
         now: Fecha/hora de referencia (UTC) de la ejecución.
     """
 
@@ -1391,6 +1392,7 @@ class TriageConfig:
     color: bool = False
     home_country: str = "MX"
     dedup: bool = False
+    summary_path: Path | None = None
     now: datetime = field(
         default_factory=lambda: datetime.now(timezone.utc))
 
@@ -2432,11 +2434,16 @@ def stream_supports(stream: IO[str], sample: str) -> bool:
     return True
 
 
+PROGRESS_ENV = "CP_TRIAGE_PROGRESS"
+
+
 class ProgressBar:
     """Barra de progreso: usa tqdm o rich si existen, si no una ASCII.
 
     La barra integrada solo se dibuja cuando stderr es una terminal y se
-    actualiza como máximo 10 veces por segundo.
+    actualiza como máximo 10 veces por segundo. Con la variable de entorno
+    ``CP_TRIAGE_PROGRESS=1`` (la usa la interfaz gráfica) se emiten líneas
+    ``@@PROGRESS<TAB>desc<TAB>avance<TAB>total<TAB>unidad`` en stderr.
 
     Attributes:
         total: Total esperado (bytes o elementos).
@@ -2466,6 +2473,10 @@ class ProgressBar:
         self._last_draw = 0.0
         self._tick = 0
         self._start = time.monotonic()
+        self._machine = enabled and os.environ.get(PROGRESS_ENV) == "1"
+        if self._machine:
+            self._enabled = False
+            self._emit()
         if not self._enabled:
             return
         _ACTIVE_BAR.append(self)
@@ -2486,6 +2497,12 @@ class ProgressBar:
             n: Incremento.
         """
         self.count += n
+        if self._machine:
+            now = time.monotonic()
+            if now - self._last_draw >= 0.25:
+                self._last_draw = now
+                self._emit()
+            return
         if not self._enabled:
             return
         if self._tqdm is not None:
@@ -2498,6 +2515,13 @@ class ProgressBar:
         if now - self._last_draw >= 0.1:
             self._last_draw = now
             self._draw()
+
+    def _emit(self) -> None:
+        """Emite una línea de progreso legible por máquina (para la GUI)."""
+        desc = self.desc.replace("\t", " ").replace("\n", " ")
+        sys.stderr.write(f"@@PROGRESS\t{desc}\t{self.count}\t{self.total}"
+                         f"\t{self.unit}\n")
+        sys.stderr.flush()
 
     def _draw(self) -> None:
         """Dibuja la barra ASCII integrada en stderr."""
@@ -2534,6 +2558,9 @@ class ProgressBar:
 
     def close(self) -> None:
         """Cierra la barra y limpia la línea de la terminal."""
+        if self._machine:
+            self._emit()
+            return
         if self in _ACTIVE_BAR:
             _ACTIVE_BAR.remove(self)
         if not self._enabled:
@@ -5439,6 +5466,7 @@ def enrich_with_abuseipdb(profile: DatasetProfile, config: TriageConfig,
         bar = ProgressBar(len(todo), "AbuseIPDB", enabled=not config.quiet,
                           unit="it")
         failures = 0
+        last_error = ""
         try:
             for _, ip, _stale in todo:
                 try:
@@ -5449,6 +5477,7 @@ def enrich_with_abuseipdb(profile: DatasetProfile, config: TriageConfig,
                 except AbuseIPDBError as exc:
                     stats.queried += 1
                     stats.query_errors += 1
+                    last_error = str(exc)
                     if exc.kind == "auth":
                         stats.disabled_reason = (
                             f"API key rechazada (HTTP {exc.status})")
@@ -5511,6 +5540,12 @@ def enrich_with_abuseipdb(profile: DatasetProfile, config: TriageConfig,
             bar.close()
             stats.remaining_quota = client.remaining
             cache.save()
+        if stats.queried and not stats.query_ok and \
+                not stats.disabled_reason:
+            stats.disabled_reason = "todas las consultas fallaron"
+            LOG.warning("AbuseIPDB: las %d consulta(s) fallaron (último "
+                        "error: %s). Se usan solo cache + firewall.",
+                        stats.queried, last_error or "desconocido")
         if stats.skipped_budget:
             LOG.warning("AbuseIPDB: %d IP(s) de menor prioridad no se "
                         "consultaron (límite --abuseipdb-max-queries=%d).",
@@ -6351,8 +6386,14 @@ def correlate(spill: Path, ctx: TriageContext) -> Correlator:
         Correlador con las campañas determinadas.
     """
     correlator = Correlator(ctx.config)
-    for rec in iter_spill(spill):
-        correlator.observe(rec, classify(rec, ctx))
+    bar = ProgressBar(ctx.profile.records, "Clasificando y correlacionando",
+                      enabled=not ctx.config.quiet, unit="it")
+    try:
+        for rec in iter_spill(spill):
+            correlator.observe(rec, classify(rec, ctx))
+            bar.update(1)
+    finally:
+        bar.close()
     correlator.finalize()
     return correlator
 
@@ -8359,8 +8400,11 @@ def run(config: TriageConfig) -> int:
         completed = False
         if config.severity_filter or config.category_filter:
             correlator.kept_ids = set()
+        bar = ProgressBar(profile.records, "Calculando score y reportes",
+                          enabled=not config.quiet, unit="it")
         try:
             for rec in iter_spill(spill):
+                bar.update(1)
                 cls = classify(rec, ctx)
                 primary, related = correlator.campaigns_for(rec, cls)
                 result = score(rec, cls, ctx,
@@ -8381,6 +8425,7 @@ def run(config: TriageConfig) -> int:
                     spool.write(alert)
             completed = True
         finally:
+            bar.close()
             if detail is not None:
                 detail.close(completed)
             if spool is not None:
@@ -8405,10 +8450,19 @@ def run(config: TriageConfig) -> int:
                                  campaigns, config)
         history.update_and_save(profile, config.history_days)
         cache.save()
+    elapsed = time.monotonic() - started
+    if config.summary_path is not None:
+        try:
+            atomic_write_text(config.summary_path, json.dumps(
+                {**summary, "elapsed_seconds": round(elapsed, 2)},
+                ensure_ascii=False))
+        except OSError as exc:
+            LOG.warning("No se pudo escribir el resumen %s: %s",
+                        config.summary_path, exc)
     if not config.quiet:
         generate_report_console(summary, config)
     LOG.info("Triage completado en %.1fs (%s alertas en reporte).",
-             time.monotonic() - started, fmt_int(stats.reported))
+             elapsed, fmt_int(stats.reported))
     return 0
 
 
@@ -8532,6 +8586,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
                           help="Desactivar colores ANSI.")
     io_group.add_argument("--dedup", action="store_true",
                           help="Omitir registros con UID/loguid repetido.")
+    io_group.add_argument("--no-csv", action="store_true",
+                          help="No generar los CSV (solo consola/JSON/HTML).")
+    io_group.add_argument("--summary-json", metavar="FILE",
+                          help="Escribir el resumen del análisis en JSON "
+                               "(lo usa la interfaz gráfica).")
     io_group.add_argument(
         "--date-order", choices=("auto", "dmy", "mdy"), default="auto",
         help="Orden de fechas ambiguas dd/mm vs mm/dd (default: auto).")
@@ -8684,7 +8743,9 @@ def build_config(args: argparse.Namespace) -> TriageConfig:
              and os.environ.get("TERM") != "dumb"
              and (os.name != "nt" or "WT_SESSION" in os.environ))
     want_csv = args.csv or not args.quiet
-    if args.quiet and not (args.csv or args.json or args.html):
+    if args.no_csv:
+        want_csv = False
+    elif args.quiet and not (args.csv or args.json or args.html):
         want_csv = True
     home = normalize_country(args.home_country) or "MX"
     return TriageConfig(
@@ -8730,6 +8791,7 @@ def build_config(args: argparse.Namespace) -> TriageConfig:
         color=color,
         home_country=home,
         dedup=args.dedup,
+        summary_path=Path(args.summary_json) if args.summary_json else None,
     )
 
 
