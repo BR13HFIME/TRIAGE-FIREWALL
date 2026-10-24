@@ -1350,6 +1350,7 @@ class TriageConfig:
         home_country: País de la infraestructura propia (IPs internas).
         dedup: Omitir registros con UID repetido.
         summary_path: Archivo donde escribir el resumen en JSON (GUI).
+        report_title: Título personalizado del reporte HTML.
         now: Fecha/hora de referencia (UTC) de la ejecución.
     """
 
@@ -1393,6 +1394,7 @@ class TriageConfig:
     home_country: str = "MX"
     dedup: bool = False
     summary_path: Path | None = None
+    report_title: str = ""
     now: datetime = field(
         default_factory=lambda: datetime.now(timezone.utc))
 
@@ -7096,6 +7098,8 @@ def build_summary(stats: DashboardStats, correlator: Correlator,
     local_now = config.now.astimezone()
     return {
         "generated_at": local_now.strftime("%Y-%m-%d %H:%M:%S"),
+        "report_title": (config.report_title
+                         or "CHECKPOINT ALERT TRIAGE REPORT"),
         "inputs": inputs,
         "records_processed": profile.records,
         "records_reported": stats.reported,
@@ -7787,7 +7791,7 @@ footer { color: var(--muted); font-size: 12px; text-align: center; }
 </head>
 <body>
 <header>
-  <h1>CHECKPOINT ALERT TRIAGE REPORT</h1>
+  <h1 id="title">CHECKPOINT ALERT TRIAGE REPORT</h1>
   <div class="meta" id="meta"></div>
 </header>
 <main>
@@ -7863,6 +7867,10 @@ footer { color: var(--muted); font-size: 12px; text-align: center; }
     });
   }
 
+  if (S.report_title) {
+    document.getElementById("title").textContent = S.report_title;
+    document.title = S.report_title;
+  }
   document.getElementById("meta").textContent =
     "Generado: " + S.generated_at + " · Entrada: " + S.inputs.join(", ") +
     " · Registros: " + fmt(S.records_processed) +
@@ -8588,6 +8596,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
                           help="Omitir registros con UID/loguid repetido.")
     io_group.add_argument("--no-csv", action="store_true",
                           help="No generar los CSV (solo consola/JSON/HTML).")
+    io_group.add_argument("--report-title", metavar="TEXTO",
+                          help="Título del reporte HTML (p. ej. el nombre "
+                               "del SOC o de la empresa).")
     io_group.add_argument("--summary-json", metavar="FILE",
                           help="Escribir el resumen del análisis en JSON "
                                "(lo usa la interfaz gráfica).")
@@ -8792,6 +8803,7 @@ def build_config(args: argparse.Namespace) -> TriageConfig:
         home_country=home,
         dedup=args.dedup,
         summary_path=Path(args.summary_json) if args.summary_json else None,
+        report_title=safe_text(args.report_title or "", 120),
     )
 
 

@@ -87,6 +87,17 @@ class GuiLogicTests(unittest.TestCase):
         self.assertIn("--dedup", cmd)
         self.assertIn("-v", cmd)
 
+    def test_report_title_and_sizes(self) -> None:
+        """El nombre del equipo va al título del reporte; tamaños legibles."""
+        settings = GUI.GuiSettings(inputs=[str(SAMPLE)], org_name="ACME SOC")
+        cmd = GUI.build_command(settings, self.tmp / "s.json", "python")
+        self.assertEqual(cmd[cmd.index("--report-title") + 1],
+                         "ACME SOC · Reporte de triage Check Point")
+        self.assertEqual(GUI.human_size(0), "0 KB")
+        self.assertEqual(GUI.human_size(5000), "5 KB")
+        self.assertEqual(GUI.human_size(3 * 1048576), "3.0 MB")
+        self.assertEqual(GUI.human_size(5 * 1073741824), "5.0 GB")
+
     def test_api_key_goes_by_environment(self) -> None:
         """La key viaja por variable de entorno, nunca en el comando."""
         env = GUI.child_env("my-secret-key-123")

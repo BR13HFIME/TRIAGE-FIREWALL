@@ -765,6 +765,20 @@ class ScoringAndReportTests(TriageTestCase):
                                   "BOGUS")
         self.assertEqual(code, 2)
 
+    def test_report_title_reaches_summary_and_html(self) -> None:
+        """``--report-title`` llega al resumen JSON y al dashboard HTML."""
+        path = self.write("t.csv", HEADER + "\n" + row() + "\n")
+        summary_path = self.tmp / "summary.json"
+        code, _, _ = self.run_cli(
+            "--input", str(path), "--html", "--report-title",
+            "ACME SOC <b>", "--summary-json", str(summary_path))
+        self.assertEqual(code, 0)
+        summary = json.loads(summary_path.read_text("utf-8"))
+        self.assertEqual(summary["report_title"], "ACME SOC <b>")
+        html = (self.tmp / "out" / "report.html").read_text("utf-8")
+        self.assertIn("ACME SOC", html)
+        self.assertNotIn("ACME SOC <b>", html)
+
     def test_help_runs(self) -> None:
         """``--help`` muestra la ayuda completa y sale con código 0."""
         buf = io.StringIO()

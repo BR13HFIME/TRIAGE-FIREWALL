@@ -25,18 +25,25 @@ Mantenga `triage.py` y `triage_gui.pyw` en la misma carpeta.
   clic derecho → Abrir). Requiere Python con tkinter: el instalador de
   python.org ya lo trae; con Homebrew, `brew install python-tk`.
 
-En la ventana:
+En la ventana (menú lateral):
 
-1. **Archivos:** agregue archivos o carpetas, elija la carpeta de
-   resultados y los reportes (CSV, HTML, JSON).
+1. **Fuentes y reportes:** agregue archivos o carpetas, elija la carpeta
+   de resultados y los reportes (CSV, HTML, JSON).
 2. **Filtros:** severidades y categorías a incluir.
 3. **AbuseIPDB:** escriba la API key, **Guardar en .env** para no volver a
    escribirla y **Probar key** para verificar que funciona. Aquí también
    se ajusta la velocidad (segundos entre consultas).
-4. **Analizar:** el progreso se ve en vivo (pestaña Registro) y se puede
-   cancelar. Al terminar, la pestaña **Resultados** muestra los conteos
-   por severidad, categorías, top IPs y recomendaciones, con botones para
-   abrir cada reporte; el dashboard HTML se abre solo.
+4. **Avanzado:** nombre del equipo o empresa (aparece en la ventana y en
+   el título del dashboard HTML), contexto de red y correlación.
+5. **Analizar ahora:** el avance se ve en vivo y se puede cancelar. Al
+   terminar, **Dashboard** muestra el resumen ejecutivo listo para
+   presentar: KPIs, dona de severidades con SLA, categorías, países de
+   origen, mapa de calor por día/hora, IPs más activas y recomendaciones,
+   con botones para abrir cada reporte; el dashboard HTML se abre solo.
+   El detalle técnico queda en **Registro**.
+
+También se puede pasar el título del reporte por línea de comandos:
+`--report-title "Mi empresa · Triage semanal"`.
 
 Las opciones se recuerdan entre sesiones (`~/.cp_triage_gui.json`); la API
 key nunca se guarda ahí ni aparece en el registro.
